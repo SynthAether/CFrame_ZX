@@ -35,3 +35,7 @@ Bin/Zip2SD.runtimeconfig.json
 Bin/ZXNext.ico
 Bin/zxnext.sd
 Bin/ZXOS.bat
+*.o
+*.bin
+*.nex
+*.map
