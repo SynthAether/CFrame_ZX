@@ -24,9 +24,10 @@ data.o: 	data.c FrameWork.h Kernel.h
 
 
 # Kernel section
-kernel.o: Kernel.asm includes.inc
+
+Kernel.o: Kernel.asm includes.inc
 	$(CC) $(CFLAGS) --codesegPAGE_02_KERNEL_CODE --constsegPAGE_02_KERNEL_CODE -o Kernel.o Kernel.asm
-irqs.o: IRQs.asm includes.inc
+IRQs.o: IRQs.asm includes.inc
 	$(CC) $(CFLAGS) --codesegPAGE_02_KERNEL_IRQ --constsegPAGE_02_KERNEL_IRQ -o IRQs.o IRQs.asm
 
 
