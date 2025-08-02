@@ -1,8 +1,9 @@
 
     SECTION KERNEL_CODE
-    PUBLIC  _WaitVBlank, _Layer2Enable, _ClsATTR, _ClsULA, _PrintHex, _DMACopy, _ReadKeyboard, _InitKernel
-    PUBLIC  _Keys, _RawKeys, _RomFont, _Print
-    EXTERN  _VBlank,_Port123b
+    PUBLIC  _WaitVBlank, _Layer2Enable, _ClsATTR, _ClsULA, _PrintHex, _DMACopy, _UploadSprites, _ReadKeyboard, _InitKernel
+    PUBLIC  _Keys, _RawKeys, _RomFont, _Print,  _CopySpriteData, _ReadNextReg,_InitSpriteData,_WipeSprites
+
+    EXTERN  _VBlank, _Port123b, _SpriteData, _SpriteShape
 
     include "includes.inc"
 
@@ -17,6 +18,45 @@ _InitKernel:
     call    DMACopy
     
     ret
+
+    ; ******************************************************************************************************************************
+;   Wipe all sprites
+; ******************************************************************************************************************************
+_WipeSprites:
+    ld      ix, _SpriteData
+    ld      b,128
+    ld      c,64
+    ld      de,5
+    xor     a   
+@InitSprites: 
+    ld      (ix+0),a
+    ld      (ix+1),a
+    ld      (ix+2),a
+    ld      (ix+3),c        ; %01000000 - enable byte 4
+    ld      (ix+0),a
+    add     ix,de
+    djnz    @InitSprites
+    ret
+
+; ******************************************************************************************************************************
+;   Reset all sprite data, including the extra bit for using 5th byte
+; ******************************************************************************************************************************
+_InitSpriteData:
+    ld      ix, _SpriteData
+    ld      b,128
+    ld      c,64
+    ld      de,5
+    xor     a   
+@InitSprites: 
+    ld      (ix+0),a
+    ld      (ix+1),a
+    ld      (ix+2),a
+    ld      (ix+3),c        ; %01000000 - enable byte 4
+    ld      (ix+0),a
+    add     ix,de
+    djnz    @InitSprites
+    ret
+
 
 ; ******************************************************************************************************************************
 ;   Wait for a Vertical Blank (uses VBlank IRQ)
@@ -127,6 +167,42 @@ DMACopy:
     ld      (DMALen),bc
     jp      DoDMACopy
 
+
+; ******************************************************************************
+; 
+; Function: Upload a set of sprites
+; In:   E = sprite shape to start at
+;       D = number of sprites
+;       HL = shape data
+;
+; ******************************************************************************
+_UploadSprites:
+    pop     bc          ; pop return address
+    pop     de          ; get Start Shape
+    pop     hl          ; get number of shapes
+    ld      d,l
+    pop     hl          ; get shape address
+    push    bc          ; restore reeturn address
+
+    ; Upload sprite graphics
+    ld      a,e     ; get start shape
+    ld      e,0     ; each pattern is 256 bytes
+
+@AllSprites:               
+    ; select pattern 2
+    ld      bc, $303B
+    out     (c),a
+
+    ; upload ALL sprite sprite image data
+    ld      bc, SpriteShapePort
+@UpLoadSprite:           
+    outi
+
+    dec     de
+    ld      a,d
+    or      e               
+    jr      nz, @UpLoadSprite
+    ret
 
 ; ******************************************************************************
 ;
@@ -294,12 +370,88 @@ _ReadKeyboard:
 ExitKeyRead:
         ret
 
+; ******************************************************************************
+; Function: Copy sprite data (x,y etc) to BRAM (assumes extended data)
+; In:   hl = Src
+;       d = slot
+;       a = count
+;       
+;
+;   |*|*||0011 0000 0011 1011| 0x303b  |Sprite slot, flags
+;   | |*||XXXX XXXX 0101 0111| 0x57    |Sprite attributes
+;   | |*||XXXX XXXX 0101 1011| 0x5b    |Sprite pattern
+
+; ******************************************************************************
+_CopySpriteData:
+        ld      hl,_SpriteData
+        ld      (DMASpSrc),hl                       ; 16
+        ld      bc,$303b
+        out     (c),d
+        ld      hl,640                              ; 128 * 5
+        ld      (DMASpLen),hl                       ; store size
+        ld      hl,DMASpriteCopyProg                ; 10
+        ld      bc,Z80DMAPORT+(DMASPCOPYSIZE*256)   ; 10
+        otir                                        ; 21*20  + 240*4
+        ret
+
+; ******************************************************************************
+; Function: Read a next register
+;           uint16 v = ReadNextReg(uint16 reg)
+; ******************************************************************************
+_ReadNextReg:
+        pop     de          ; get return address
+        pop     hl
+
+        ; read MSB of raster first
+        ld      bc,$243b    ; select NEXT register
+        out     (c),l
+        inc     b           ; $253b to access (read or write) value
+        in      l,(c)
+        ld      h,0
+        push    de          ; push return address back
+        ret                 ; return in HL
+
 
 ; ******************************************************************************************************************************
-;
-;       Kernel Data
-;
 ; ******************************************************************************************************************************
+; ******************************************************************************************************************************
+;       Kernel Data
+; ******************************************************************************************************************************
+; ******************************************************************************************************************************
+; ******************************************************************************************************************************
+DMASpriteCopyProg:
+        db $C3          ; R6-RESET DMA
+        db $C7          ; R6-RESET PORT A Timing
+        db $CB          ; R6-SET PORT B Timing same as PORT A
+
+        db $7D          ; R0-Transfer mode, A -> B
+DMASpSrc:
+        dw $1234        ; R0-Port A, Start address               (source address)
+DMASpLen:    
+        dw 240          ; R0-Block length                        (length in bytes)
+
+        db $54          ; R1-Port A address incrementing, variable timing
+        db $02          ; R1-Cycle length port A
+      
+        db $78          ; R2-Port B address fixed, variable timing Write to a "PORT"
+        db $02          ; R2-Cycle length (2) port B
+      
+        db $AD          ; R4-Continuous mode  (use this for block tansfer)
+DMASpDest:
+        dw $0057        ; R4-Dest address (Sprite DATA)          (destination port)
+          
+        db $82          ; R5-Restart on end of block, RDY active LOW
+     
+        db $CF          ; R6-Load
+        db $B3          ; R6-Force Ready
+        db $87          ; R6-Enable DMA
+ENDSPDMA:
+        defc    DMASPCOPYSIZE   = ENDSPDMA-DMASpriteCopyProg
+
+
+
+
+
 HexCharset:
         db %00000000    ;char30  '0'
         db %00111100
@@ -464,4 +616,70 @@ ENDDMA:
 _Keys:      ds  40
 _RawKeys:   ds  8
 _RomFont:   ds  0x300       ; copy of the ROM font
+            incbin  "ROMFONT.FNT"
+
+            ; xxxxxxxx
+            ; yyyyyyyy
+            ; PPPP_XM_YM_R_X8/PR
+            ; V_E_NNNNNN
+            ; H_N6_T_XX_YY_Y8
+            ; +- 0_1_N6_XX_YY_PO
+            ; +- 0_1_N6_0000_PO
+
+_SpriteData: ds  128*5           ; raw sprite data
+
+_SpriteShape:
+            db  $e3,$e3,$e3,$e3,$e3,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$e3,$ff,$ff,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$ff,$ff,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$e3,$ff,$ff,$e3,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$e3,$ff,$ff,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$e3,$ff,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$e3,$e3,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$e3,$ff,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$ff,$ff,$ff,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$ff,$ff,$ff,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$ff,$ff,$ff,$e3,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$ff,$ff,$ff,$ff,$e3,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$e3,$ff,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$ff,$ff,$ff,$e3,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$ff,$ff,$e3,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $e3,$ff,$ff,$ff,$e3,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+
+            db  $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff
+            db  $ff,$ff,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$ff,$ff
+            db  $ff,$00,$ff,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$ff,$00,$ff
+            db  $ff,$00,$00,$ff,$00,$00,$00,$00,$00,$00,$00,$00,$ff,$00,$00,$ff
+            db  $ff,$00,$00,$00,$ff,$00,$00,$00,$00,$00,$00,$ff,$00,$00,$00,$ff
+            db  $ff,$00,$00,$00,$00,$ff,$00,$00,$00,$00,$ff,$00,$00,$00,$00,$ff
+            db  $ff,$00,$00,$00,$00,$00,$ff,$00,$00,$ff,$00,$00,$00,$00,$00,$ff
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$ff,$00,$00,$00,$00,$00,$00,$ff
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$ff,$00,$00,$00,$00,$00,$00,$ff
+            db  $ff,$00,$00,$00,$00,$00,$ff,$00,$00,$ff,$00,$00,$00,$00,$00,$ff
+            db  $ff,$00,$00,$00,$00,$ff,$00,$00,$00,$00,$ff,$00,$00,$00,$00,$ff
+            db  $ff,$00,$00,$00,$ff,$00,$00,$00,$00,$00,$00,$ff,$00,$00,$00,$ff
+            db  $ff,$00,$00,$ff,$00,$00,$00,$00,$00,$00,$00,$00,$ff,$00,$00,$ff
+            db  $ff,$00,$ff,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$ff,$00,$ff
+            db  $ff,$ff,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$00,$ff,$ff
+            db  $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff
+
+            db  $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$00,$00,$00,$00,$00,$00,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+            db  $ff,$ff,$ff,$ff,$ff,$ff,$ff,$ff,$e3,$e3,$e3,$e3,$e3,$e3,$e3,$e3
+
+_EndKernel:
+
 

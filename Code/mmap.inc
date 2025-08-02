@@ -1,6 +1,7 @@
 # *******************************************************************************************
 #
 #	Default Banks:	10,11,4,5,0,1
+#	Free Banks:	3
 #
 #
 #	+------------------------------------------------+
@@ -28,5 +29,16 @@ SECTION KERNEL_IRQ
 SECTION PAGE_02_KERNEL_END
 	org 0xFFFF
 SECTION KERNEL_END
+
+
+# 6+7
+SECTION PAGE_06_GAMEPLAY_SEG
+	org 0x0000
+SECTION GAMEPLAY_SEG
+
+# 8+9
+SECTION PAGE_08_FRONTEND_SEG
+	org 0x0000
+SECTION FRONTEND_SEG
 
 

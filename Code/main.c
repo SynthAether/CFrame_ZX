@@ -23,31 +23,70 @@
 #include "FrameWork.h"
 #include "Kernel.h"
 #include "data.h"
+#include "FrontEnd.h"
+#include "GamePlay.h"
 
 
-// ************************************************************************************************************************
-//  Main Loop
-// ************************************************************************************************************************
+// ****************************************************************************************
+//  Handle the main loop and state changes
+// ****************************************************************************************
 void MainLoop(void)
 {
+    SetState(State_InitFrontEnd);
     while(1)
-    {
+    {        
         WaitVBlank();
+        CopySpriteData();
         ReadKeyboard();
-        FrameCounter++;
 
-        if( Keys[VK_SPACE])
+        // Do game states
+        switch(GameState)
         {
-            Print(80,184,"Space Pressed");
+            case State_InitFrontEnd:
+            {
+                NextReg(0x50,8);
+                FE_Init();
+                break;
+            }
+            case State_FrontEnd:
+            {
+                NextReg(0x50,8);
+                FE_Process();
+                FE_Render();
+                break;
+            }
+            case State_QuitFrontEnd:
+            {
+                NextReg(0x50,8);
+                FE_Quit();
+                break;
+            }
+            case State_InitGame:
+            {
+                NextReg(0x50,6);
+                GP_Init();
+                break;
+            }
+            case State_Game:
+            {
+                NextReg(0x50,6);
+                GP_Process();
+                GP_Render();
+                break;
+            }
+            case State_QuitGame:
+            {
+                NextReg(0x50,6);
+                GP_Quit();
+                break;
+            }
+            default:{
+                SetState(State_InitFrontEnd);
+            }
         }
-        else{
-            Print(80,184,"----- -------");
-        }
-
-        PrintHex((FrameCounter>>8)&0xff,0x5000);
-        PrintHex(FrameCounter&0xff,0x5002);
-    }    
+    }
 }
+
 
 
 // ************************************************************************************************************************
@@ -55,34 +94,32 @@ void MainLoop(void)
 // ************************************************************************************************************************
 int  main(void)
 {
-    BREAK;                          // Stop the debugger at the start
+    BREAK;
     intrinsic_label(Main_Label);
 
+    NextReg(0x7,3);           // 28Mhz
+    NextReg(0x8,0x4A);        // Disable RAM contention, enable DAC and turbosound
+    NextReg(0x5,0x04);        // 60Hz mode
+    NextReg(0x15,0x03);       // layer order - and sprites on
+    NextReg(0x4b,0xe3);       // sprite transparency
 
-    NextReg(0x7,3);                 // 28Mhz
-    NextReg(0x8,0x4A);              // Disable RAM contention, enable DAC and turbosound
-    NextReg(0x5,0x04);              // 60Hz mode
-    NextReg(0x15,0x03);             // layer order - and sprites on
-    NextReg(0x4b,0xe3);             // sprite transparency
 
-
-    NextReg(0x57,2);                // page in kernal - $E000->$FFFF
+    NextReg(0x57,2);          // page in kernel
     InitKernel();
     SetUpIRQs();
 
-
     Layer2Enable(false);
-    ClsATTR(56);                    // white paper, black ink
+    ClsATTR(56);                // white paper, black ink
     ClsULA();
 
-
     PrintHex(0x12,0x4000);
-    Print(16,32,"Hello World");
-    DMACopy(0x4000,0x4800,0x800);   // copy the top of the screen to half way down (shows HEX message)
+    DMACopy(0x4000,0x4800,0x800);
+    UploadSprites(0,0x04,(uint16*) 0x5678);
 
     MainLoop();
 
-    while(1){}                      // never exit
+    // never return
+    while(1){}
 }
 
 

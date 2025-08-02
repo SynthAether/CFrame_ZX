@@ -19,7 +19,7 @@
 //	Global Variables here
 //-------------------------------------
 
-	uint16	FrameCounter;
+	eGameState	GameState;
 
 
 
