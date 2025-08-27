@@ -5,9 +5,10 @@
 #define __FRAMEWORK_H__
 
 #include <arch/zxn.h>
+#include <intrinsic.h>
 
-#define BREAK  { __asm defb 0xFD,0x00 __endasm; }
-#define EXIT   { __asm defb 0xDD,0x00 __endasm; }
+#define BREAK { intrinsic_emit(0xFD); intrinsic_emit(0x00); }
+#define EXIT { intrinsic_emit(0xDD); intrinsic_emit(0x00); }
 #define NextReg(r,v)	ZXN_NEXTREG_helper(r,v)
 #define NextRegA(r,var)	ZXN_NEXTREGA_helper(r,var)
 
